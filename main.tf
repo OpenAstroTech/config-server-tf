@@ -1,12 +1,12 @@
 data "azurerm_client_config" "current" {}
 
 resource "azurerm_resource_group" "oatconf" {
-  name     = "rg-oatconf"
+  name     = "rg-${local.name_suffix}"
   location = local.location
 }
 
 resource "azurerm_cosmosdb_account" "oatconf" {
-  name                = "cosmos-acc-oatconf"
+  name                = "cosmon-${local.name_suffix}"
   resource_group_name = azurerm_resource_group.oatconf.name
   location            = azurerm_resource_group.oatconf.location
 
@@ -42,10 +42,14 @@ resource "azurerm_cosmosdb_account" "oatconf" {
     location          = local.location
     failover_priority = 0
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_log_analytics_workspace" "oatconf" {
-  name                = "la-oatconf"
+  name                = "log-${local.name_suffix}"
   location            = azurerm_resource_group.oatconf.location
   resource_group_name = azurerm_resource_group.oatconf.name
   sku                 = "PerGB2018"
@@ -53,7 +57,7 @@ resource "azurerm_log_analytics_workspace" "oatconf" {
 }
 
 resource "azurerm_application_insights" "oatconf" {
-  name                = "ai-oatconf"
+  name                = "appi-${local.name_suffix}"
   location            = azurerm_resource_group.oatconf.location
   resource_group_name = azurerm_resource_group.oatconf.name
   workspace_id        = azurerm_log_analytics_workspace.oatconf.id
@@ -61,25 +65,30 @@ resource "azurerm_application_insights" "oatconf" {
 }
 
 resource "azurerm_container_app_environment" "oatconf" {
-  name                       = "caenv-oatconf"
+  name                       = "cae-${local.name_suffix}"
   location                   = azurerm_resource_group.oatconf.location
   resource_group_name        = azurerm_resource_group.oatconf.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.oatconf.id
 }
 
 resource "azurerm_container_app" "oatconf" {
-  name                         = "oatconf"
+  name                         = "ca-${local.name_suffix}"
   container_app_environment_id = azurerm_container_app_environment.oatconf.id
   resource_group_name          = azurerm_resource_group.oatconf.name
   revision_mode                = "Single"
 
   secret {
-    name = "mongo-connection-string"
+    name  = "mongo-connection-string"
     value = tostring("${azurerm_cosmosdb_account.oatconf.connection_strings[0]}")
   }
 
+  secret {
+    name  = "appinsights-connection-string"
+    value = tostring("${azurerm_application_insights.oatconf.connection_string}")
+  }
+
   template {
-    
+
     container {
       name   = "config-server"
       image  = "openastrotech/config-server:latest"
@@ -87,17 +96,28 @@ resource "azurerm_container_app" "oatconf" {
       memory = "0.5Gi"
 
       env {
-        name = "MONGO_CONNECTION_STRING"
+        name        = "MONGO_CONNECTION_STRING"
         secret_name = "mongo-connection-string"
+      }
+
+      env {
+        name        = "APPINSIGHTS_CONNECTION_STRING"
+        secret_name = "appinsights-connection-string"
+      }
+
+      liveness_probe {
+        transport = "HTTP"
+        port      = 80
+        path      = "/docs"
       }
     }
   }
 
   ingress {
-    target_port = 80
+    target_port      = 80
     external_enabled = true
     traffic_weight {
-      percentage = 100
+      percentage      = 100
       latest_revision = true
     }
   }
