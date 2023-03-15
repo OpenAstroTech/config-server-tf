@@ -1,18 +1,8 @@
 terraform {
   required_providers {
     azurerm = {
-      version = "=3.43.0"
+      version = "=3.47.0"
     }
-    random = {
-      version = "=3.1.0"
-    }
-  }
-
-  backend "azurerm" {
-    resource_group_name  = "rg-tfstate"
-    storage_account_name = "tfstate174011566"
-    container_name       = "oatconf"
-    key                  = "terraform.tfstate"
   }
 }
 
