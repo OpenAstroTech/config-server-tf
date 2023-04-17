@@ -1,109 +1,34 @@
-module "naming" {
-  source  = "Azure/naming/azurerm"
-  suffix = ["oatconf", var.stage]
+module "db" {
+  source = "./db"
+  
+  env_name = var.env_name
+  locations = var.locations
 }
 
-data "azurerm_client_config" "current" {}
+module "log" {
+  source = "./log"
 
-resource "azurerm_resource_group" "oatconf" {
-  name     = module.naming.resource_group.name
-  location = var.location
+  env_name = var.env_name
+  location = var.locations[0]
 }
 
-resource "azurerm_cosmosdb_account" "oatconf" {
-  name                = module.naming.cosmosdb_account.name
-  resource_group_name = azurerm_resource_group.oatconf.name
-  location            = azurerm_resource_group.oatconf.location
+module "app" {
+  for_each = toset(var.locations)
+  source = "./app"
 
-  offer_type           = "Standard"
-  kind                 = "MongoDB"
-  mongo_server_version = "4.2"
+  env_name = var.env_name
+  location = each.value
 
-  enable_automatic_failover = true
+  mongodb_connection_string = module.db.connection_string
 
-  capabilities {
-    name = "EnableServerless"
-  }
-
-  capabilities {
-    name = "DisableRateLimitingResponses"
-  }
-
-  capabilities {
-    name = "EnableMongo"
-  }
-
-  capabilities {
-    name = "EnableAggregationPipeline"
-  }
-
-  consistency_policy {
-    consistency_level       = "BoundedStaleness"
-    max_interval_in_seconds = 300
-    max_staleness_prefix    = 100000
-  }
-
-  geo_location {
-    location          = var.location
-    failover_priority = 0
-  }
+  log_analytics_workspace_id = module.log.log_analytics_workspace_id
 }
 
-resource "azurerm_log_analytics_workspace" "oatconf" {
-  name                = module.naming.log_analytics_workspace.name
-  location            = azurerm_resource_group.oatconf.location
-  resource_group_name = azurerm_resource_group.oatconf.name
-  sku                 = "PerGB2018"
-  retention_in_days   = 30
-}
+module "traffic" {
+  source = "./traffic"
 
-resource "azurerm_application_insights" "oatconf" {
-  name                = module.naming.application_insights.name
-  location            = azurerm_resource_group.oatconf.location
-  resource_group_name = azurerm_resource_group.oatconf.name
-  workspace_id        = azurerm_log_analytics_workspace.oatconf.id
-  application_type    = "web"
-}
-
-resource "azurerm_container_app_environment" "oatconf" {
-  name                       = "cae-oatconf-${var.stage}"
-  location                   = azurerm_resource_group.oatconf.location
-  resource_group_name        = azurerm_resource_group.oatconf.name
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.oatconf.id
-}
-
-resource "azurerm_container_app" "oatconf" {
-  name                         = "ca-oatconf-${var.stage}"
-  container_app_environment_id = azurerm_container_app_environment.oatconf.id
-  resource_group_name          = azurerm_resource_group.oatconf.name
-  revision_mode                = "Single"
-
-  secret {
-    name = "mongo-connection-string"
-    value = tostring("${azurerm_cosmosdb_account.oatconf.connection_strings[0]}")
-  }
-
-  template {
-    
-    container {
-      name   = "config-server"
-      image  = "openastrotech/config-server:latest"
-      cpu    = "0.25"
-      memory = "0.5Gi"
-
-      env {
-        name = "MONGO_CONNECTION_STRING"
-        secret_name = "mongo-connection-string"
-      }
-    }
-  }
-
-  ingress {
-    target_port = 80
-    external_enabled = true
-    traffic_weight {
-      percentage = 100
-      latest_revision = true
-    }
-  }
+  env_name = var.env_name
+  targets = [
+    for app in module.app : app.latest_revision_fqdn
+  ]
 }

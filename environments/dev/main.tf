@@ -1,7 +1,10 @@
-module "stage" {
+module "env" {
   source = "../base"
 
-  stage = "dev"
+  env_name = "dev"
 
-  location = "westeurope"
+  locations = [
+    "westeurope",
+    "westus"
+  ]
 }
